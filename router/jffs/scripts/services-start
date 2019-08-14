@@ -29,8 +29,8 @@ do
     IP=`echo $BRIDGE_IP | sed "s/X/$N/"`
 
     # The lan counter is always sequential
-    LAN="lan$i"
-    i=$(( $i+1 ))
+    LAN="lan$counter"
+    counter=$(( $counter + 1 ))
 
     # Create the VLAN
     robocfg vlan $N ports "$ROUTER_PORT"
@@ -60,6 +60,7 @@ then
     nvram set lan_ifname="$DEFAULT_BRIDGE"
 
     nvram set $DEFAULT_BRIDGE\_ifnames=`nvram get lan_ifnames`
+    nvram set $DEFAULT_BRIDGE\_ifname=$DEFAULT_BRIDGE
 
     # restart eapd
     killall eapd
