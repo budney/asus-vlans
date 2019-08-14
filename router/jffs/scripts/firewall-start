@@ -3,9 +3,9 @@
 # Firewall rules for guest VLANs on bridge br1
 #
 
-# Set parameters here
-LAN_IFACE=br0
-WAN_IFACE=eth0
+# Set parameters here:
+LAN_IFACE=br0       ; # This should match the original network bridge interface
+WILDCARD_IFACE=br+  ; # This should match all the new VLAN bridge interfaces
 
 # Get a list of all chains that mention $LAN_IFACE
 CHAINS=`iptables -S | egrep $LAN_IFACE | awk '{print $2}' | sort -u`
@@ -15,8 +15,8 @@ create_chains()
     IFACE=$1
 
     # Rewrite the rule that prevents leakage of stray packets to the WAN
-    iptables -D FORWARD ! -i br0 -o eth0 -j other2wan
-    iptables -I FORWARD ! -i br+ -o eth0 -j other2wan
+    iptables -D FORWARD ! -i $LAN_IFACE -o eth0 -j other2wan
+    iptables -I FORWARD ! -i $WILDCARD_IFACE -o eth0 -j other2wan
 
     # Step through the chains, creating a similar chain for each guest network
     for CHAIN in $CHAINS
@@ -55,28 +55,28 @@ add_isolation_rules()
 
     # Drop any new connections from guest wifi to the router,
     # but DO forward connection attempts to hosts other than the router.
-    iptables -I guest-INPUT -i $IFACE -m state --state NEW -d $GATEWAY -j DROP
-    iptables -I guest-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
+    iptables -I $IFACE-INPUT -i $IFACE -m state --state NEW -d $GATEWAY -j DROP
+    iptables -I $IFACE-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
 
     # Block any connections between the guest and non-guest networks,
     # and between two different guest networks.
-    iptables -I guest-FORWARD -i $IFACE -o br+ -m state --state NEW -j DROP
-    iptables -I guest-FORWARD -i br+ -o $IFACE -m state --state NEW -j DROP
-    iptables -I guest-FORWARD -i $IFACE -o $IFACE -m state --state NEW -j ACCEPT
+    iptables -I $IFACE-FORWARD -i $IFACE -o $WILDCARD_IFACE -m state --state NEW -j DROP
+    iptables -I $IFACE-FORWARD -i $WILDCARD_IFACE -o $IFACE -m state --state NEW -j DROP
+    iptables -I $IFACE-FORWARD -i $IFACE -o $IFACE -m state --state NEW -j ACCEPT
 
     # ...but allow guests to access DHCP
-    iptables -I guest-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
+    iptables -I $IFACE-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
 
     # Also allow guests to access DNS
-    iptables -I guest-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
-    iptables -I guest-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
+    iptables -I $IFACE-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
+    iptables -I $IFACE-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
 }
 
 #--------------------------------------------------------------
 # The script proper begins here.
 #--------------------------------------------------------------
 
-# List all the bridge interfaces except br0
+# List all the bridge interfaces except $LAN_IFACE
 BRIDGES=`ifconfig -a | sed 's/[ \t].*//;/^\([^b]\|.[^r]\|..0$\|$\)/d;'`
 
 # Loop through all the bridges
