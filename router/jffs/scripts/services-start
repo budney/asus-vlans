@@ -19,7 +19,7 @@ counter=1
 # attempt to move wireless guest fails (no security only works) until restart of eapd below
 #
 # Actually move the interfaces to the new bridge
-for GuestWifiDevice in $Guest24 $Guest5 vlan20
+for GuestWifiDevice in $Guest24 $Guest5
 do
     # Figure out the VLAN number. wl0.1 becomes 101; wl1.2 becomes 112; etc.
     # The VLAN, bridge, and gateway IP all contain this number.
