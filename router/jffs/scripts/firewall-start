@@ -4,56 +4,91 @@
 #
 
 # Set parameters here
-IFACE=br1
-LAN=br0
-GW=172.20.153.1
+LAN_IFACE=br0
+WAN_IFACE=eth0
 
-# Get a list of all chains that mention $LAN
-CHAINS=`iptables -S | egrep $LAN | awk '{print $2}' | sort -u`
+# Get a list of all chains that mention $LAN_IFACE
+CHAINS=`iptables -S | egrep $LAN_IFACE | awk '{print $2}' | sort -u`
 
-# Step through the chains, creating a simiilar chain for guest networks
-for CHAIN in $CHAINS
-do
-    # Remove the reference to the chain
-    iptables -D $CHAIN -i $IFACE -j guest-$CHAIN
+create_chains()
+{
+    IFACE=$1
 
-    # Flush, delete, and recreate the chain
-    iptables -F guest-$CHAIN
-    iptables -X guest-$CHAIN
-    iptables -N guest-$CHAIN
+    # Rewrite the rule that prevents leakage of stray packets to the WAN
+    iptables -D FORWARD ! -i br0 -o eth0 -j other2wan
+    iptables -I FORWARD ! -i br+ -o eth0 -j other2wan
 
-    # Invoke the new chain from the old one
-    iptables -I $CHAIN -i $IFACE -j guest-$CHAIN
-
-    # Clone all the rules for $LAN into the new chain for $IFACE
-    iptables -S $CHAIN | egrep $LAN | sed "s}$LAN}$IFACE}g" | sed "s}$CHAIN}guest-$CHAIN}g" | \
-    while read rule
+    # Step through the chains, creating a similar chain for each guest network
+    for CHAIN in $CHAINS
     do
-        iptables $rule
+        # Remove the reference to the chain
+        iptables -D $CHAIN -i $IFACE -j $IFACE-$CHAIN
+
+        # Flush, delete, and recreate the chain
+        iptables -F $IFACE-$CHAIN
+        iptables -X $IFACE-$CHAIN
+        iptables -N $IFACE-$CHAIN
+
+        # Invoke the new chain from the old one
+        iptables -I $CHAIN -i $IFACE -j $IFACE-$CHAIN
+
+        # Clone all the rules for $LAN_IFACE into the new chain for $IFACE.
+        iptables -S $CHAIN | egrep $LAN_IFACE | sed "s}$LAN_IFACE}$IFACE}g" | sed "s}$CHAIN}$IFACE-$CHAIN}g" | \
+        while read rule
+        do
+            iptables $rule
+        done
     done
+}
+
+add_isolation_rules()
+{
+    IFACE=$1
+    GATEWAY=$2
+
+    #----------------------------------------------------------
+    # From here on down, rules are inserted at the top of the
+    # chain, in order to run before any of the rules we copied
+    # from the LAN interface. That means that these rules will
+    # be checked in the reverse order than they're added below.
+    #----------------------------------------------------------
+
+    # Drop any new connections from guest wifi to the router,
+    # but DO forward connection attempts to hosts other than the router.
+    iptables -I guest-INPUT -i $IFACE -m state --state NEW -d $GATEWAY -j DROP
+    iptables -I guest-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
+
+    # Block any connections between the guest and non-guest networks,
+    # and between two different guest networks.
+    iptables -I guest-FORWARD -i $IFACE -o br+ -m state --state NEW -j DROP
+    iptables -I guest-FORWARD -i br+ -o $IFACE -m state --state NEW -j DROP
+    iptables -I guest-FORWARD -i $IFACE -o $IFACE -m state --state NEW -j ACCEPT
+
+    # ...but allow guests to access DHCP
+    iptables -I guest-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
+
+    # Also allow guests to access DNS
+    iptables -I guest-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
+    iptables -I guest-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
+}
+
+#--------------------------------------------------------------
+# The script proper begins here.
+#--------------------------------------------------------------
+
+# List all the bridge interfaces except br0
+BRIDGES=`ifconfig -a | sed 's/[ \t].*//;/^\([^b]\|.[^r]\|..0$\|$\)/d;'`
+
+# Loop through all the bridges
+for IFACE in $BRIDGES
+do
+    GATEWAY=`ifconfig $IFACE|sed '/inet addr/!d;s/^.*inet addr://;s/[ \t].*$//;'`
+
+    # Create rule chains for this interface
+    create_chains($IFACE)
+
+    # Create the security rules for this interface and gateway
+    add_security_rules($IFACE, $IP)
 done
-
-#----------------------------------------------------------
-# From here on down, rules are inserted at the top of the
-# chain, in order to run before any of the rules we copied
-# from the LAN interface. That means that these rules will
-# be checked in the reverse order than they're added below.
-#----------------------------------------------------------
-
-# Drop any new connections from guest wifi to the router;
-# forward any other new connections
-iptables -I guest-INPUT -i $IFACE -m state --state NEW -d $GW -j DROP
-iptables -I guest-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
-
-# Block any connections between the guest and non-guest networks
-iptables -I guest-FORWARD -i $IFACE -o $LAN -m state --state NEW -j DROP
-iptables -I guest-FORWARD -i $LAN -o $IFACE -m state --state NEW -j DROP
-
-# ...but allow guests to access DHCP
-iptables -I guest-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
-
-# Also allow guests to access DNS
-iptables -I guest-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
-iptables -I guest-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
 
 # That's it!

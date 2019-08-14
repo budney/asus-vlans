@@ -1,48 +1,67 @@
 #!/bin/sh
 
-# Create VLAN 20
-robocfg vlan 20 ports "1t 2t 3t 4t 5t"
-vconfig add eth0 20
-ifconfig vlan20 up
-
-# Create the bridge interface
-brctl addbr br1
-brctl stp br1 on
+# Important variables
+ROUTER_PORT=5t
+WAN_IFACE=eth0
+DEFAULT_BRIDGE=br0
+BRIDGE_IP=172.X.153.1   ; # <-- Put an X where you want the VLAN number
+NETMASK=255.255.255.0
 
 # get list of configured guest wireless networks
 #
 Guest24=`nvram get wl0_vifs`
 Guest5=`nvram get wl1_vifs`
 
+# Count the networks we've created for setting nvram parameters
+counter=1
+
 # Move all Guest wireless to br1
 # attempt to move wireless guest fails (no security only works) until restart of eapd below
 #
-lan1names="vlan20"
-
 # Actually move the interfaces to the new bridge
 for GuestWifiDevice in $Guest24 $Guest5 vlan20
 do
-    brctl delif br0 $GuestWifiDevice
-    brctl addif br1 $GuestWifiDevice
+    # Figure out the VLAN number. wl0.1 becomes 101; wl1.2 becomes 112; etc.
+    # The VLAN, bridge, and gateway IP all contain this number.
+    N=`echo $GuestWifiDevice | sed 's/\.//; s/wl/1/;'`
+    VLAN="vlan$N"
+    BRIDGE="br$N"
+    IP=`echo $BRIDGE_IP | sed "s/X/$N/"`
 
-    # add name to list with preceding blank
-    lan1names="$lan1names $GuestWifiDevice"
+    # The lan counter is always sequential
+    LAN="lan$i"
+    i=$(( $i+1 ))
+
+    # Create the VLAN
+    robocfg vlan $N ports "$ROUTER_PORT"
+    vconfig add $WAN_IFACE $N
+    ifconfig $VLAN up
+
+    # Create the bridge interface
+    brctl addbr $BRIDGE
+    brctl stp $BRIDGE on
+
+    brctl delif $DEFAULT_BRIDGE $GuestWifiDevice
+    brctl addif $BRIDGE $GuestWifiDevice
+
+    # Activate the bridge interface
+    ifconfig $BRIDGE $IP netmask $NETMASK up
+
+    # Set nvram variables for the new network, 
+    nvram set $LAN\_ifnames="$VLAN $GuestWifiDevice"
+    nvram set $LAN\_ifname="$BRIDGE"
 done
 
-# Activate the bridge interface
-ifconfig br1 172.20.153.1 netmask 255.255.255.0 up
-
-# if guest wifi moved, set some nvram variables and restart eapd to fix security
-if [ "x$lan1names" != "x" ]
+# If there were any guest networks, reset the nvram parameter for the original default network,
+# and then restart eapd to fix handling of secured WiFi networks.
+if [ "x$Guest24$Guest5" != "x" ]
 then
-    nvram set lan_ifnames="vlan1 eth1 eth2"
-    nvram set lan_ifname="br0"
+    nvram set lan_ifnames=`nvram get $DEFAULT_BRIDGE\_ifnames | sed 's/wl[0-9]\.[0-9][ \t]*//g;'`
+    nvram set lan_ifname="$DEFAULT_BRIDGE"
 
-    nvram set lan1_ifnames="`echo $lan1names | sed 's/^[ \t]*//;s/[ \t]*$//'`"
-    nvram set lan1_ifname="br1"
+    nvram set $DEFAULT_BRIDGE\_ifnames=`nvram get lan_ifnames`
 
     # restart eapd
     killall eapd
     eapd
 fi
-
