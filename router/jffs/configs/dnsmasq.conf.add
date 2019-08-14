@@ -1,0 +1,6 @@
+# DHCP settings for guest networks
+interface=br1
+dhcp-range=br1,172.20.153.100,172.20.153.199,255.255.255.0,86400s
+dhcp-option=br1,3,172.18.153.1
+dhcp-option=br1,6,172.18.153.1
+dhcp-option=br1,44,172.18.153.1

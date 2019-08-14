@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# Firewall rules for guest VLANs on bridge br1
+#
+
+# Set parameters here
+IFACE=br1
+LAN=br0
+GW=172.20.153.1
+
+# Get a list of all chains that mention $LAN
+CHAINS=`iptables -S | egrep $LAN | awk '{print $2}' | sort -u`
+
+# Step through the chains, creating a simiilar chain for guest networks
+for CHAIN in $CHAINS
+do
+    # Remove the reference to the chain
+    iptables -D $CHAIN -i $IFACE -j guest-$CHAIN
+
+    # Flush, delete, and recreate the chain
+    iptables -F guest-$CHAIN
+    iptables -X guest-$CHAIN
+    iptables -N guest-$CHAIN
+
+    # Invoke the new chain from the old one
+    iptables -I $CHAIN -i $IFACE -j guest-$CHAIN
+
+    # Clone all the rules for $LAN into the new chain for $IFACE
+    iptables -S $CHAIN | egrep $LAN | sed "s}$LAN}$IFACE}g" | sed "s}$CHAIN}guest-$CHAIN}g" | \
+    while read rule
+    do
+        iptables $rule
+    done
+done
+
+#----------------------------------------------------------
+# From here on down, rules are inserted at the top of the
+# chain, in order to run before any of the rules we copied
+# from the LAN interface. That means that these rules will
+# be checked in the reverse order than they're added below.
+#----------------------------------------------------------
+
+# Drop any new connections from guest wifi to the router;
+# forward any other new connections
+iptables -I guest-INPUT -i $IFACE -m state --state NEW -d $GW -j DROP
+iptables -I guest-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
+
+# Block any connections between the guest and non-guest networks
+iptables -I guest-FORWARD -i $IFACE -o $LAN -m state --state NEW -j DROP
+iptables -I guest-FORWARD -i $LAN -o $IFACE -m state --state NEW -j DROP
+
+# ...but allow guests to access DHCP
+iptables -I guest-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
+
+# Also allow guests to access DNS
+iptables -I guest-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
+iptables -I guest-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
+
+# That's it!

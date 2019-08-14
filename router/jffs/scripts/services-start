@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# Create VLAN 20
+robocfg vlan 20 ports "1t 2t 3t 4t 5t"
+vconfig add eth0 20
+ifconfig vlan20 up
+
+# Create the bridge interface
+brctl addbr br1
+brctl stp br1 on
+
+# get list of configured guest wireless networks
+#
+Guest24=`nvram get wl0_vifs`
+Guest5=`nvram get wl1_vifs`
+
+# Move all Guest wireless to br1
+# attempt to move wireless guest fails (no security only works) until restart of eapd below
+#
+lan1names="vlan20"
+
+# Actually move the interfaces to the new bridge
+for GuestWifiDevice in $Guest24 $Guest5 vlan20
+do
+    brctl delif br0 $GuestWifiDevice
+    brctl addif br1 $GuestWifiDevice
+
+    # add name to list with preceding blank
+    lan1names="$lan1names $GuestWifiDevice"
+done
+
+# Activate the bridge interface
+ifconfig br1 172.20.153.1 netmask 255.255.255.0 up
+
+# if guest wifi moved, set some nvram variables and restart eapd to fix security
+if [ "x$lan1names" != "x" ]
+then
+    nvram set lan_ifnames="vlan1 eth1 eth2"
+    nvram set lan_ifname="br0"
+
+    nvram set lan1_ifnames="`echo $lan1names | sed 's/^[ \t]*//;s/[ \t]*$//'`"
+    nvram set lan1_ifname="br1"
+
+    # restart eapd
+    killall eapd
+    eapd
+fi
+
