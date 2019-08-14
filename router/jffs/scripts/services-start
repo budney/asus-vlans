@@ -4,7 +4,7 @@
 ROUTER_PORT=5t
 WAN_IFACE=eth0
 DEFAULT_BRIDGE=br0
-BRIDGE_IP=172.X.153.1   ; # <-- Put an X where you want the VLAN number
+BRIDGE_IP=172.X.0.1   ; # <-- Put an X where you want the VLAN number
 NETMASK=255.255.255.0
 
 # get list of configured guest wireless networks
