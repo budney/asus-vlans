@@ -14,8 +14,19 @@ create_chains()
 {
     IFACE=$1
 
+    # Rewrite the rule that collect statistics on stray WAN packets
+    iptables -D INPUT ! -i $LAN_IFACE -j PTCSRVWAN
+    iptables -D INPUT ! -i $WILDCARD_IFACE -j PTCSRVWAN
+    iptables -I INPUT ! -i $WILDCARD_IFACE -j PTCSRVWAN
+
+    # Rewrite the rule that collect statistics on stray LAN packets
+    iptables -D INPUT -i $LAN_IFACE -j PTCSRVLAN
+    iptables -D INPUT -i $WILDCARD_IFACE -j PTCSRVLAN
+    iptables -I INPUT -i $WILDCARD_IFACE -j PTCSRVLAN
+
     # Rewrite the rule that prevents leakage of stray packets to the WAN
     iptables -D FORWARD ! -i $LAN_IFACE -o eth0 -j other2wan
+    iptables -D FORWARD ! -i $WILDCARD_IFACE -o eth0 -j other2wan
     iptables -I FORWARD ! -i $WILDCARD_IFACE -o eth0 -j other2wan
 
     # Step through the chains, creating a similar chain for each guest network
@@ -29,8 +40,12 @@ create_chains()
         iptables -X $IFACE-$CHAIN
         iptables -N $IFACE-$CHAIN
 
-        # Invoke the new chain from the old one
-        iptables -I $CHAIN -i $IFACE -j $IFACE-$CHAIN
+        # Invoke the new chain from the old one. Make
+        # this rule last, just in case some security rule
+        # wants to override us.
+        iptables -D $CHAIN -j DROP
+        iptables -A $CHAIN -i $IFACE -j $IFACE-$CHAIN
+        iptables -A $CHAIN -j DROP
 
         # Clone all the rules for $LAN_IFACE into the new chain for $IFACE.
         iptables -S $CHAIN | egrep $LAN_IFACE | sed "s}$LAN_IFACE}$IFACE}g" | sed "s}$CHAIN}$IFACE-$CHAIN}g" | \
@@ -41,7 +56,7 @@ create_chains()
     done
 }
 
-add_isolation_rules()
+add_security_rules()
 {
     IFACE=$1
     GATEWAY=$2
@@ -85,10 +100,10 @@ do
     GATEWAY=`ifconfig $IFACE|sed '/inet addr/!d;s/^.*inet addr://;s/[ \t].*$//;'`
 
     # Create rule chains for this interface
-    create_chains($IFACE)
+    create_chains $IFACE
 
     # Create the security rules for this interface and gateway
-    add_security_rules($IFACE, $IP)
+    add_security_rules $IFACE $GATEWAY
 done
 
 # That's it!

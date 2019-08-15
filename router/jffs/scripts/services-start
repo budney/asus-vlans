@@ -6,11 +6,18 @@ WAN_IFACE=eth0
 DEFAULT_BRIDGE=br0
 BRIDGE_IP=172.X.0.1   ; # <-- Put an X where you want the VLAN number
 NETMASK=255.255.255.0
+LAN_IFNAMES=`nvram get ${DEFAULT_BRIDGE}_ifnames | sed 's}[ \t]*wl[0-9]\.[0-9][ \t]*}}g'`
 
 # get list of configured guest wireless networks
 #
 Guest24=`nvram get wl0_vifs`
 Guest5=`nvram get wl1_vifs`
+
+# Sub for doing logging
+log()
+{
+    /usr/bin/logger -p 6 "$@"
+}
 
 # Count the networks we've created for setting nvram parameters
 counter=1
@@ -32,6 +39,8 @@ do
     LAN="lan$counter"
     counter=$(( $counter + 1 ))
 
+    log "Setting up $VLAN"
+
     # Create the VLAN
     robocfg vlan $N ports "$ROUTER_PORT"
     vconfig add $WAN_IFACE $N
@@ -47,20 +56,34 @@ do
     # Activate the bridge interface
     ifconfig $BRIDGE $IP netmask $NETMASK up
 
+    log "Setting nvram ${LAN}_ifname=$BRIDGE"
+    log "Setting nvram ${LAN}_ifnames=\"$VLAN $GuestWifiDevice\""
+
     # Set nvram variables for the new network, 
-    nvram set $LAN\_ifnames="$VLAN $GuestWifiDevice"
-    nvram set $LAN\_ifname="$BRIDGE"
+    nvram set ${LAN}_ifname="$BRIDGE"
+    nvram set ${LAN}_ifnames="$VLAN $GuestWifiDevice"
 done
 
 # If there were any guest networks, reset the nvram parameter for the original default network,
 # and then restart eapd to fix handling of secured WiFi networks.
 if [ "x$Guest24$Guest5" != "x" ]
 then
-    nvram set lan_ifnames=`nvram get $DEFAULT_BRIDGE\_ifnames | sed 's/wl[0-9]\.[0-9][ \t]*//g;'`
-    nvram set lan_ifname="$DEFAULT_BRIDGE"
+    # Wait for the network interfaces to actually come up
+    sleep 10
 
-    nvram set $DEFAULT_BRIDGE\_ifnames=`nvram get lan_ifnames`
-    nvram set $DEFAULT_BRIDGE\_ifname=$DEFAULT_BRIDGE
+    log "Setting nvram lan_ifname=$DEFAULT_BRIDGE"
+    log "Setting nvram lan_ifnames=\"$LAN_IFNAMES\""
+
+    nvram set lan_ifname="$DEFAULT_BRIDGE"
+    nvram set lan_ifnames="$LAN_IFNAMES"
+
+    log "Old nvram value: ${DEFAULT_BRIDGE}_ifname=`nvram get ${DEFAULT_BRIDGE}_ifname`"
+    log "Old nvram value: ${DEFAULT_BRIDGE}_ifnames=\"`nvram get ${DEFAULT_BRIDGE}_ifnames`\""
+
+    nvram set ${DEFAULT_BRIDGE}_ifname="$DEFAULT_BRIDGE"
+    nvram set ${DEFAULT_BRIDGE}_ifnames="$LAN_IFNAMES"
+
+    log "Restarting eapd"
 
     # restart eapd
     killall eapd
