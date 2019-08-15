@@ -71,8 +71,8 @@ add_security_rules()
 
     # Drop any new connections from guest wifi to the router,
     # but DO forward connection attempts to hosts other than the router.
-    iptables -I $IFACE-INPUT -i $IFACE -m state --state NEW -d $GATEWAY -j DROP
     iptables -I $IFACE-FORWARD -i $IFACE -m state --state NEW -j ACCEPT
+    iptables -I $IFACE-INPUT -i $IFACE -m state --state NEW -d $GATEWAY -j DROP
 
     # Block any connections between the guest and non-guest networks,
     # and between two different guest networks.
@@ -88,6 +88,13 @@ add_security_rules()
     do
         for IP in $NAMESERVERS
         do
+            iptables -D INPUT -p $PROTO --sport 53 -s $IP -j ACCEPT
+            iptables -I INPUT -p $PROTO --sport 53 -s $IP -j ACCEPT
+
+            iptables -D FORWARD -i eth0 -p $PROTO --sport 53 -s $IP -m state --state ESTABLISHED -j ACCEPT
+            iptables -I FORWARD -i eth0 -p $PROTO --sport 53 -s $IP -m state --state ESTABLISHED -j ACCEPT
+
+            iptables -I $IFACE-INPUT -p $PROTO --dport 53 -j ACCEPT
             iptables -I $IFACE-FORWARD -i $IFACE -p $PROTO --dport 53 -d $IP -m state --state NEW,ESTABLISHED -j ACCEPT
         done
     done
