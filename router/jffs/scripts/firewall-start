@@ -6,6 +6,7 @@
 # Set parameters here:
 LAN_IFACE=br0       ; # This should match the original network bridge interface
 WILDCARD_IFACE=br+  ; # This should match all the new VLAN bridge interfaces
+NAMESERVERS="208.67.222.123 208.67.220.123"
 
 # Get a list of all chains that mention $LAN_IFACE
 CHAINS=`iptables -S | egrep $LAN_IFACE | awk '{print $2}' | sort -u`
@@ -82,9 +83,14 @@ add_security_rules()
     # ...but allow guests to access DHCP
     iptables -I $IFACE-INPUT -i $IFACE -p udp --dport 67:68 --sport 67:68 -j ACCEPT
 
-    # Also allow guests to access DNS
-    iptables -I $IFACE-INPUT -i $IFACE -p udp --dport 53 -j ACCEPT
-    iptables -I $IFACE-INPUT -i $IFACE -p tcp --dport 53 -j ACCEPT
+    # Also allow guests to access the approved DNS server only
+    for PROTO in tcp udp
+    do
+        for IP in $NAMESERVERS
+        do
+            iptables -I $IFACE-FORWARD -i $IFACE -p $PROTO --dport 53 -d $IP -m state --state NEW,ESTABLISHED -j ACCEPT
+        done
+    done
 }
 
 #--------------------------------------------------------------
